@@ -1,0 +1,5 @@
+{
+  "name": "VideoScripter",
+  "description": "An intelligent video analysis tool that generates accurate transcripts and summaries using Gemini Pro.",
+  "requestFramePermissions": []
+}
