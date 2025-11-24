@@ -39,6 +39,7 @@ export interface VideoProject {
   duration?: number; // Duration in seconds
   processingTime?: number; // Time taken to process in ms
   sourceUrl?: string; // Original URL if uploaded via link
+  progress?: number; // 0-100 progress for processing
 }
 
 export type ExportFormat = 'json' | 'txt' | 'srt';

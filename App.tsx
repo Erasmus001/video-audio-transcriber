@@ -4,6 +4,7 @@ import VideoPlayer from './components/VideoPlayer';
 import TranscriptList from './components/TranscriptList';
 import ChatInterface from './components/ChatInterface';
 import Dashboard from './components/Dashboard';
+import NotificationToast, { Notification } from './components/NotificationToast';
 import { analyzeVideo, askVideoQuestion, generateExportContent } from './services/geminiService';
 import { getCachedTranscript, cacheTranscript, saveProject, getAllProjects, deleteProjectFromDB } from './services/dbService';
 import { VideoProject, ChatMessage, VideoAnalysisData } from './types';
@@ -14,6 +15,9 @@ function App() {
   const [showUpload, setShowUpload] = useState(false);
   const [isUrlLoading, setIsUrlLoading] = useState(false);
   const [isLoadingDB, setIsLoadingDB] = useState(true);
+  
+  // Notification State
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   
   // View state: 'landing' is the initial promo screen, 'dashboard' is the list of projects
   const [view, setView] = useState<'landing' | 'dashboard'>('landing');
@@ -35,6 +39,75 @@ function App() {
   // Helper to generate ID
   const generateId = () => Math.random().toString(36).substring(2, 9);
 
+  // Sound Player using Web Audio API (Soothing)
+  const playSound = (type: 'success' | 'error') => {
+    try {
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContext) return;
+      const ctx = new AudioContext();
+      const now = ctx.currentTime;
+
+      // Master Gain
+      const masterGain = ctx.createGain();
+      masterGain.connect(ctx.destination);
+      masterGain.gain.setValueAtTime(0.1, now); // Volume
+
+      if (type === 'success') {
+        // Major Chord Arpeggio (C5 - E5 - G5)
+        [523.25, 659.25, 783.99].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          
+          osc.connect(gain);
+          gain.connect(masterGain);
+          
+          const start = now + (i * 0.1);
+          gain.gain.setValueAtTime(0, start);
+          gain.gain.linearRampToValueAtTime(1, start + 0.05);
+          gain.gain.exponentialRampToValueAtTime(0.001, start + 1);
+          
+          osc.start(start);
+          osc.stop(start + 1);
+        });
+      } else {
+        // Gentle Low Error Tone
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(150, now);
+        osc.frequency.linearRampToValueAtTime(100, now + 0.3);
+        
+        osc.connect(gain);
+        gain.connect(masterGain);
+        
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(1, now + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+        
+        osc.start(now);
+        osc.stop(now + 0.5);
+      }
+    } catch (e) {
+      console.error("Audio play failed", e);
+    }
+  };
+
+  const addNotification = (type: 'success' | 'error', message: string) => {
+    const id = Date.now().toString();
+    setNotifications(prev => [...prev, { id, type, message }]);
+    
+    // Auto remove after 5 seconds
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 5000);
+  };
+
+  const dismissNotification = (id: string) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+  };
+
   // Load projects from DB on mount
   useEffect(() => {
     const loadProjects = async () => {
@@ -46,8 +119,13 @@ function App() {
           const updatedProject = { ...p };
           
           // Re-create preview URL from stored Blob/File
-          if ((p.file as any) instanceof Blob) {
-             updatedProject.previewUrl = URL.createObjectURL(p.file);
+          // Use a try-catch for safety when creating URL
+          try {
+             if (p.file && (p.file instanceof Blob || (p.file as any) instanceof File)) {
+                updatedProject.previewUrl = URL.createObjectURL(p.file);
+             }
+          } catch (e) {
+             console.error("Error hydrating project file:", e);
           }
 
           // If status was processing when saved (app closed during process), mark as failed/interrupted
@@ -100,8 +178,27 @@ function App() {
     });
   };
 
+  const readFileAsBase64 = (file: Blob, onProgress?: (progress: number) => void): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64String = reader.result as string;
+        resolve(base64String.split(',')[1]);
+      };
+      reader.onprogress = (event) => {
+        if (event.lengthComputable && onProgress) {
+          const percent = (event.loaded / event.total) * 100;
+          onProgress(percent);
+        }
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
   const startAnalysis = async (project: VideoProject) => {
     // Update DB status to processing
+    // We don't save progress to DB to avoid thrashing, just status
     saveProject(project);
 
     // Create abort controller for this job
@@ -109,6 +206,9 @@ function App() {
     abortControllers.current.set(project.id, controller);
     
     const startTime = Date.now();
+    
+    // Interval ID for simulated progress
+    let progressInterval: NodeJS.Timeout | null = null;
 
     try {
        // 1. Check Cache First
@@ -120,22 +220,57 @@ function App() {
                 ...project, 
                 status: 'completed' as const, 
                 data: cached.data,
-                processingTime: 0 // Instant
+                processingTime: 0, // Instant
+                progress: 100
             };
             
             setProjects(prev => prev.map(p => p.id === project.id ? completedProject : p));
             saveProject(completedProject);
+            playSound('success');
+            addNotification('success', `"${project.fileName}" restored from cache.`);
             return;
          }
        }
 
-       // 2. Process if no cache
-       const base64Data = await readFileAsBase64(project.file);
+       // 2. Read File (0-30% of progress)
+       const base64Data = await readFileAsBase64(project.file, (readPercent) => {
+          // Map read progress (0-100) to total progress (0-30)
+          setProjects(prev => prev.map(p => 
+            p.id === project.id ? { ...p, progress: Math.round(readPercent * 0.3) } : p
+          ));
+       });
+
+       // 3. Process/Analyze (30-95% simulated progress)
+       // Set initial analyze progress
+       setProjects(prev => prev.map(p => 
+         p.id === project.id ? { ...p, progress: 30 } : p
+       ));
+
+       progressInterval = setInterval(() => {
+         setProjects(prev => prev.map(p => {
+           if (p.id === project.id && p.status === 'processing') {
+             const current = p.progress || 30;
+             // Asymptotic approach to 95%
+             // Slower as it gets higher
+             let step = 1;
+             if (current > 60) step = 0.5;
+             if (current > 80) step = 0.2;
+             if (current > 90) step = 0.05;
+             
+             const next = Math.min(current + step, 95);
+             return { ...p, progress: next }; // Keep float in state for smooth animation, round in UI
+           }
+           return p;
+         }));
+       }, 500);
        
        const result = await analyzeVideo(base64Data, project.mimeType, controller.signal);
+       
+       if (progressInterval) clearInterval(progressInterval);
+
        const endTime = Date.now();
        
-       // 3. Save to Cache
+       // 4. Save to Cache
        if (project.duration) {
          await cacheTranscript(project.fileName, project.fileSize, project.duration, result);
        }
@@ -144,44 +279,41 @@ function App() {
            ...project, 
            status: 'completed' as const, 
            data: result,
-           processingTime: endTime - startTime
+           processingTime: endTime - startTime,
+           progress: 100
        };
 
        setProjects(prev => prev.map(p => p.id === project.id ? completedProject : p));
        saveProject(completedProject);
+       
+       playSound('success');
+       addNotification('success', `"${project.fileName}" transcription completed successfully.`);
 
     } catch (error: any) {
+        if (progressInterval) clearInterval(progressInterval);
+        
         if (error.name === 'AbortError' || error.message === 'Aborted') {
            setProjects(prev => {
-               const updated = prev.map(p => p.id === project.id ? { ...p, status: 'cancelled' as const } : p);
+               const updated = prev.map(p => p.id === project.id ? { ...p, status: 'cancelled' as const, progress: 0 } : p);
                const cancelledProject = updated.find(p => p.id === project.id);
                if (cancelledProject) saveProject(cancelledProject);
                return updated;
            });
+           addNotification('error', `Transcription for "${project.fileName}" cancelled.`);
         } else {
            console.error("Analysis failed", error);
            setProjects(prev => {
-               const updated = prev.map(p => p.id === project.id ? { ...p, status: 'failed' as const, error: error.message } : p);
+               const updated = prev.map(p => p.id === project.id ? { ...p, status: 'failed' as const, error: error.message, progress: 0 } : p);
                const failedProject = updated.find(p => p.id === project.id);
                if (failedProject) saveProject(failedProject);
                return updated;
            });
+           playSound('error');
+           addNotification('error', `Failed to transcribe "${project.fileName}". ${error.message}`);
         }
     } finally {
         abortControllers.current.delete(project.id);
     }
-  };
-
-  const readFileAsBase64 = (file: Blob): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64String = reader.result as string;
-        resolve(base64String.split(',')[1]);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
   };
 
   const handleFileSelect = async (file: File) => {
@@ -198,7 +330,8 @@ function App() {
       status: 'processing',
       createdAt: Date.now(),
       previewUrl: URL.createObjectURL(file),
-      duration: duration
+      duration: duration,
+      progress: 0
     };
 
     setProjects(prev => [newProject, ...prev]);
@@ -235,7 +368,8 @@ function App() {
         createdAt: Date.now(),
         previewUrl: URL.createObjectURL(blob),
         duration: duration,
-        sourceUrl: url
+        sourceUrl: url,
+        progress: 0
       };
 
       setProjects(prev => [newProject, ...prev]);
@@ -255,7 +389,7 @@ function App() {
     if (!project) return;
 
     setProjects(prev => prev.map(p => 
-      p.id === id ? { ...p, status: 'processing', error: undefined, processingTime: undefined } : p
+      p.id === id ? { ...p, status: 'processing', error: undefined, processingTime: undefined, progress: 0 } : p
     ));
 
     startAnalysis(project);
@@ -268,7 +402,7 @@ function App() {
       abortControllers.current.delete(id);
     }
     setProjects(prev => {
-        const updated = prev.map(p => p.id === id ? { ...p, status: 'cancelled' as const } : p);
+        const updated = prev.map(p => p.id === id ? { ...p, status: 'cancelled' as const, progress: 0 } : p);
         const stoppedProject = updated.find(p => p.id === id);
         if (stoppedProject) saveProject(stoppedProject);
         return updated;
@@ -374,7 +508,9 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50">
+    <div className="min-h-screen flex flex-col bg-gray-50 relative">
+      <NotificationToast notifications={notifications} onDismiss={dismissNotification} />
+
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
