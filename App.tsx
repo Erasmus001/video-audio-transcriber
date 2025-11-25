@@ -208,7 +208,7 @@ function App() {
     const startTime = Date.now();
     
     // Interval ID for simulated progress
-    let progressInterval: NodeJS.Timeout | null = null;
+    let progressInterval: ReturnType<typeof setInterval> | null = null;
 
     try {
        // 1. Check Cache First

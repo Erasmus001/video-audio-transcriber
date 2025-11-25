@@ -25,12 +25,12 @@ export const analyzeVideo = async (
     properties: {
       summary: {
         type: Type.STRING,
-        description: "A concise summary of the video content (approx 100-150 words).",
+        description: "A concise summary of the content (approx 100-150 words).",
       },
       topics: {
         type: Type.ARRAY,
         items: { type: Type.STRING },
-        description: "List of 3-5 main topics discussed in the video.",
+        description: "List of 3-5 main topics discussed.",
       },
       transcript: {
         type: Type.ARRAY,
@@ -42,7 +42,7 @@ export const analyzeVideo = async (
           },
           propertyOrdering: ["timestamp", "text"],
         },
-        description: "A detailed transcript of the video.",
+        description: "A detailed transcript of the audio/video.",
       },
     },
     propertyOrdering: ["summary", "topics", "transcript"],
@@ -55,7 +55,7 @@ export const analyzeVideo = async (
     }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-2.5-flash',
       contents: {
         parts: [
           {
@@ -65,14 +65,14 @@ export const analyzeVideo = async (
             },
           },
           {
-            text: "Analyze this video. Provide a detailed transcript with timestamps, a comprehensive summary, and key topics discussed.",
+            text: "Analyze this media file. Provide a detailed transcript with timestamps, a comprehensive summary, and key topics discussed.",
           },
         ],
       },
       config: {
         responseMimeType: "application/json",
         responseSchema: schema,
-        systemInstruction: "You are an expert video analyst and transcriber. Your goal is to provide accurate, well-formatted transcripts and insightful summaries.",
+        systemInstruction: "You are an expert transcriber and analyst. Your goal is to provide accurate, well-formatted transcripts and insightful summaries for both audio and video inputs.",
       },
     });
 
@@ -118,7 +118,7 @@ export const askVideoQuestion = async (
   
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-2.5-flash',
       contents: {
         parts: [
           {
@@ -128,7 +128,7 @@ export const askVideoQuestion = async (
             },
           },
           {
-             text: `You are answering questions about the video provided. 
+             text: `You are answering questions about the media provided. 
              
              Previous conversation history (if any):
              ${history.map(h => `${h.role}: ${h.text}`).join('\n')}

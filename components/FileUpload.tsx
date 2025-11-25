@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 
 interface FileUploadProps {
   onFileSelect: (file: File) => void;
@@ -7,10 +7,27 @@ interface FileUploadProps {
 }
 
 const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, onUrlSelect, isLoading = false }) => {
-  const [activeTab, setActiveTab] = useState<'file' | 'url'>('file');
+  const [activeTab, setActiveTab] = useState<'file' | 'url' | 'record'>('file');
   const [urlInput, setUrlInput] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Recording State
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (audioStream) {
+        audioStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [audioStream]);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -49,6 +66,59 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, onUrlSelect, isLo
     }
   };
 
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      setAudioStream(stream);
+      
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      chunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const file = new File([blob], `recording_${Date.now()}.webm`, { type: 'audio/webm' });
+        onFileSelect(file);
+        
+        // Cleanup stream
+        stream.getTracks().forEach(track => track.stop());
+        setAudioStream(null);
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+
+      timerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+
+    } catch (err) {
+      console.error("Error accessing microphone:", err);
+      alert("Could not access microphone. Please ensure permissions are granted.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
   return (
     <div className="w-full max-w-2xl mx-auto">
       {/* Tabs */}
@@ -69,9 +139,17 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, onUrlSelect, isLo
         >
           Video Link
         </button>
+        <button
+          onClick={() => setActiveTab('record')}
+          className={`px-6 py-2 rounded-md text-sm font-medium transition-all ${
+            activeTab === 'record' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          Record Audio
+        </button>
       </div>
 
-      {activeTab === 'file' ? (
+      {activeTab === 'file' && (
         <div 
           className={`rounded-3xl border-4 border-dashed transition-all duration-300 ease-in-out cursor-pointer p-12 text-center bg-white
             ${isDragging 
@@ -106,7 +184,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, onUrlSelect, isLo
             </div>
           </div>
         </div>
-      ) : (
+      )}
+
+      {activeTab === 'url' && (
         <div className="bg-white rounded-3xl border border-gray-200 p-12 shadow-sm">
           <div className="flex flex-col items-center justify-center space-y-6">
             <div className="p-4 rounded-full bg-gray-100">
@@ -141,6 +221,55 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, onUrlSelect, isLo
               </p>
             </form>
           </div>
+        </div>
+      )}
+
+      {activeTab === 'record' && (
+        <div className="bg-white rounded-3xl border border-gray-200 p-12 shadow-sm">
+           <div className="flex flex-col items-center justify-center space-y-8">
+              <div className={`relative p-8 rounded-full transition-all duration-500 ${isRecording ? 'bg-red-50' : 'bg-gray-50'}`}>
+                 {isRecording && (
+                   <div className="absolute inset-0 rounded-full border-4 border-red-500 opacity-20 animate-ping"></div>
+                 )}
+                 <span className={`material-icons-round text-6xl ${isRecording ? 'text-red-500' : 'text-gray-400'}`}>
+                   mic
+                 </span>
+              </div>
+              
+              <div className="text-center">
+                 {isRecording ? (
+                   <>
+                     <div className="text-4xl font-mono font-bold text-gray-800 mb-2">
+                       {formatTime(recordingTime)}
+                     </div>
+                     <p className="text-red-500 font-medium animate-pulse">Recording in progress...</p>
+                   </>
+                 ) : (
+                   <>
+                     <h3 className="text-xl font-bold text-gray-700">Record Audio</h3>
+                     <p className="text-gray-500 mt-2">Use your microphone to record audio directly</p>
+                   </>
+                 )}
+              </div>
+
+              {!isRecording ? (
+                <button 
+                  onClick={startRecording}
+                  className="bg-brand-600 text-white px-8 py-3 rounded-full hover:bg-brand-700 transition-all shadow-lg hover:shadow-brand-500/30 font-semibold flex items-center gap-2"
+                >
+                  <span className="material-icons-round">fiber_manual_record</span>
+                  Start Recording
+                </button>
+              ) : (
+                <button 
+                  onClick={stopRecording}
+                  className="bg-red-500 text-white px-8 py-3 rounded-full hover:bg-red-600 transition-all shadow-lg hover:shadow-red-500/30 font-semibold flex items-center gap-2"
+                >
+                  <span className="material-icons-round">stop</span>
+                  Stop Recording
+                </button>
+              )}
+           </div>
         </div>
       )}
     </div>
