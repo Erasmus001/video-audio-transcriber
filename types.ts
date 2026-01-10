@@ -1,6 +1,13 @@
+
 export interface TranscriptSegment {
   timestamp: string;
   text: string;
+  seconds: number;
+}
+
+export interface Chapter {
+  title: string;
+  timestamp: string;
   seconds: number;
 }
 
@@ -8,6 +15,7 @@ export interface VideoAnalysisData {
   summary: string;
   transcript: TranscriptSegment[];
   topics: string[];
+  chapters: Chapter[];
 }
 
 export interface ChatMessage {
@@ -40,6 +48,7 @@ export interface VideoProject {
   processingTime?: number; // Time taken to process in ms
   sourceUrl?: string; // Original URL if uploaded via link
   progress?: number; // 0-100 progress for processing
+  chatHistory?: ChatMessage[]; // Persisted chat conversation
 }
 
 export type ExportFormat = 'json' | 'txt' | 'srt';

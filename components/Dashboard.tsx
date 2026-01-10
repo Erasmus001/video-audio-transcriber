@@ -1,4 +1,5 @@
-import React from 'react';
+
+import React, { useState } from 'react';
 import { VideoProject } from '../types';
 
 interface DashboardProps {
@@ -18,6 +19,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   onStop,
   onNewUpload
 }) => {
+  const [searchTerm, setSearchTerm] = useState('');
+
   const formatDate = (timestamp: number) => {
     if (!timestamp || isNaN(timestamp)) return '-';
     return new Date(timestamp).toLocaleDateString(undefined, {
@@ -44,28 +47,59 @@ const Dashboard: React.FC<DashboardProps> = ({
     return `${(ms / 1000).toFixed(1)}s`;
   };
 
+  const filteredProjects = projects.filter(project => 
+    project.fileName.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <div className="space-y-6 animate-fade-in-up">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
            <h2 className="text-2xl font-bold text-gray-900">Dashboard</h2>
            <p className="text-gray-500 text-sm mt-1">Manage your transcription projects</p>
         </div>
         <button 
           onClick={onNewUpload}
-          className="bg-brand-600 text-white px-4 py-2 rounded-lg hover:bg-brand-700 transition-colors shadow-sm flex items-center gap-2 font-medium"
+          className="bg-brand-600 text-white px-4 py-2 rounded-lg hover:bg-brand-700 transition-colors shadow-sm flex items-center gap-2 font-medium self-start"
         >
           <span className="material-icons-round">add</span>
           Add Media
         </button>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+      {/* Search Bar */}
+      {projects.length > 0 && (
+        <div className="relative">
+          <span className="material-icons-round absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">search</span>
+          <input 
+            type="text"
+            placeholder="Search projects by filename..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all text-sm shadow-sm"
+            aria-label="Search projects"
+          />
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden min-h-[300px] flex flex-col">
         {projects.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">
+          <div className="p-12 text-center text-gray-500 flex-1 flex flex-col items-center justify-center">
             <span className="material-icons-round text-5xl text-gray-300 mb-4">folder_open</span>
-            <p className="text-lg">No projects yet.</p>
+            <p className="text-lg font-medium">No projects yet.</p>
             <p className="text-sm">Upload a video or audio file to get started.</p>
+          </div>
+        ) : filteredProjects.length === 0 ? (
+          <div className="p-12 text-center text-gray-500 flex-1 flex flex-col items-center justify-center">
+            <span className="material-icons-round text-5xl text-gray-300 mb-4">search_off</span>
+            <p className="text-lg font-medium">No results found.</p>
+            <p className="text-sm">Try a different search term or check your spelling.</p>
+            <button 
+              onClick={() => setSearchTerm('')}
+              className="mt-4 text-brand-600 hover:text-brand-700 text-sm font-semibold"
+            >
+              Clear Search
+            </button>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -82,7 +116,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {projects.map((project) => (
+                {filteredProjects.map((project) => (
                   <tr key={project.id} className="hover:bg-gray-50 transition-colors group">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">

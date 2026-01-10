@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { VideoAnalysisData, TranscriptSegment, ExportFormat } from "../types";
 
@@ -12,6 +13,7 @@ const parseTimestamp = (timestamp: string): number => {
   return 0;
 };
 
+// Fixed analyzeVideo to include chapters in the schema and response processing
 export const analyzeVideo = async (
   base64Data: string, 
   mimeType: string,
@@ -19,7 +21,7 @@ export const analyzeVideo = async (
 ): Promise<VideoAnalysisData> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // Define schema for structured output
+  // Define schema for structured output, including mandatory chapters
   const schema = {
     type: Type.OBJECT,
     properties: {
@@ -31,6 +33,18 @@ export const analyzeVideo = async (
         type: Type.ARRAY,
         items: { type: Type.STRING },
         description: "List of 3-5 main topics discussed.",
+      },
+      chapters: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING, description: "A short, descriptive title for this chapter." },
+            timestamp: { type: Type.STRING, description: "Start time in MM:SS format." },
+          },
+          propertyOrdering: ["title", "timestamp"],
+        },
+        description: "Major sections or chapters of the media.",
       },
       transcript: {
         type: Type.ARRAY,
@@ -45,8 +59,8 @@ export const analyzeVideo = async (
         description: "A detailed transcript of the audio/video.",
       },
     },
-    propertyOrdering: ["summary", "topics", "transcript"],
-    required: ["summary", "topics", "transcript"],
+    propertyOrdering: ["summary", "topics", "chapters", "transcript"],
+    required: ["summary", "topics", "chapters", "transcript"],
   };
 
   try {
@@ -65,14 +79,14 @@ export const analyzeVideo = async (
             },
           },
           {
-            text: "Analyze this media file. Provide a detailed transcript with timestamps, a comprehensive summary, and key topics discussed.",
+            text: "Analyze this media file. Provide a detailed transcript with timestamps, a comprehensive summary, key topics discussed, and major chapters or segments with their titles and start times.",
           },
         ],
       },
       config: {
         responseMimeType: "application/json",
         responseSchema: schema,
-        systemInstruction: "You are an expert transcriber and analyst. Your goal is to provide accurate, well-formatted transcripts and insightful summaries for both audio and video inputs.",
+        systemInstruction: "You are an expert transcriber and analyst. Your goal is to provide accurate, well-formatted transcripts, insightful summaries, and clear chapter divisions for both audio and video inputs.",
       },
     });
 
@@ -93,9 +107,16 @@ export const analyzeVideo = async (
       seconds: parseTimestamp(item.timestamp),
     }));
 
+    // Enrich chapters with parsed seconds for seeking
+    const enrichedChapters = data.chapters.map((item: any) => ({
+      ...item,
+      seconds: parseTimestamp(item.timestamp),
+    }));
+
     return {
       summary: data.summary,
       topics: data.topics,
+      chapters: enrichedChapters,
       transcript: enrichedTranscript,
     };
   } catch (error) {

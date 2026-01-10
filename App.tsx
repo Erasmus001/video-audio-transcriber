@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import FileUpload from './components/FileUpload';
 import VideoPlayer from './components/VideoPlayer';
@@ -118,8 +119,6 @@ function App() {
         const hydratedProjects = savedProjects.map(p => {
           const updatedProject = { ...p };
           
-          // Re-create preview URL from stored Blob/File
-          // Use a try-catch for safety when creating URL
           try {
              if (p.file && (p.file instanceof Blob || (p.file as any) instanceof File)) {
                 updatedProject.previewUrl = URL.createObjectURL(p.file);
@@ -128,7 +127,6 @@ function App() {
              console.error("Error hydrating project file:", e);
           }
 
-          // If status was processing when saved (app closed during process), mark as failed/interrupted
           if (p.status === 'processing') {
             updatedProject.status = 'failed';
             updatedProject.error = 'Analysis interrupted by page reload';
@@ -140,7 +138,6 @@ function App() {
 
         setProjects(hydratedProjects);
         
-        // If we have projects, go straight to dashboard
         if (hydratedProjects.length > 0) {
           setView('dashboard');
         }
@@ -154,7 +151,7 @@ function App() {
     loadProjects();
   }, []);
 
-  // Clean up object URLs when projects are deleted or app unmounts
+  // Clean up object URLs
   useEffect(() => {
     return () => {
       projects.forEach(p => {
@@ -197,17 +194,12 @@ function App() {
   };
 
   const startAnalysis = async (project: VideoProject) => {
-    // Update DB status to processing
-    // We don't save progress to DB to avoid thrashing, just status
     saveProject(project);
 
-    // Create abort controller for this job
     const controller = new AbortController();
     abortControllers.current.set(project.id, controller);
     
     const startTime = Date.now();
-    
-    // Interval ID for simulated progress
     let progressInterval: ReturnType<typeof setInterval> | null = null;
 
     try {
@@ -220,8 +212,9 @@ function App() {
                 ...project, 
                 status: 'completed' as const, 
                 data: cached.data,
-                processingTime: 0, // Instant
-                progress: 100
+                processingTime: 0,
+                progress: 100,
+                chatHistory: project.chatHistory || []
             };
             
             setProjects(prev => prev.map(p => p.id === project.id ? completedProject : p));
@@ -232,16 +225,14 @@ function App() {
          }
        }
 
-       // 2. Read File (0-30% of progress)
+       // 2. Read File
        const base64Data = await readFileAsBase64(project.file, (readPercent) => {
-          // Map read progress (0-100) to total progress (0-30)
           setProjects(prev => prev.map(p => 
             p.id === project.id ? { ...p, progress: Math.round(readPercent * 0.3) } : p
           ));
        });
 
-       // 3. Process/Analyze (30-95% simulated progress)
-       // Set initial analyze progress
+       // 3. Process/Analyze
        setProjects(prev => prev.map(p => 
          p.id === project.id ? { ...p, progress: 30 } : p
        ));
@@ -250,15 +241,13 @@ function App() {
          setProjects(prev => prev.map(p => {
            if (p.id === project.id && p.status === 'processing') {
              const current = p.progress || 30;
-             // Asymptotic approach to 95%
-             // Slower as it gets higher
              let step = 1;
              if (current > 60) step = 0.5;
              if (current > 80) step = 0.2;
              if (current > 90) step = 0.05;
              
              const next = Math.min(current + step, 95);
-             return { ...p, progress: next }; // Keep float in state for smooth animation, round in UI
+             return { ...p, progress: next };
            }
            return p;
          }));
@@ -280,7 +269,8 @@ function App() {
            status: 'completed' as const, 
            data: result,
            processingTime: endTime - startTime,
-           progress: 100
+           progress: 100,
+           chatHistory: [] // Initialize chat history
        };
 
        setProjects(prev => prev.map(p => p.id === project.id ? completedProject : p));
@@ -331,30 +321,24 @@ function App() {
       createdAt: Date.now(),
       previewUrl: URL.createObjectURL(file),
       duration: duration,
-      progress: 0
+      progress: 0,
+      chatHistory: []
     };
 
     setProjects(prev => [newProject, ...prev]);
     setShowUpload(false);
-    setView('dashboard'); // Switch to dashboard view
-    
-    // Start processing in background
+    setView('dashboard');
     startAnalysis(newProject);
   };
 
   const handleUrlSelect = async (url: string) => {
     setIsUrlLoading(true);
     try {
-      // Try to fetch the blob
       const response = await fetch(url);
       if (!response.ok) throw new Error("Failed to fetch file from URL");
       const blob = await response.blob();
-      
-      // Determine type from blob or url extension
       const type = blob.type.startsWith('audio/') ? 'audio' : 'video';
-      // Use URL end as filename or default
       const fileName = url.split('/').pop() || `downloaded_${type}`;
-      
       const duration = await getMediaDuration(blob, type);
 
       const newProject: VideoProject = {
@@ -369,14 +353,14 @@ function App() {
         previewUrl: URL.createObjectURL(blob),
         duration: duration,
         sourceUrl: url,
-        progress: 0
+        progress: 0,
+        chatHistory: []
       };
 
       setProjects(prev => [newProject, ...prev]);
       setShowUpload(false);
-      setView('dashboard'); // Switch to dashboard view
+      setView('dashboard');
       startAnalysis(newProject);
-
     } catch (err) {
       alert("Could not fetch media from URL. It may be blocked by CORS. Try downloading it first.");
     } finally {
@@ -387,11 +371,9 @@ function App() {
   const handleRetry = (id: string) => {
     const project = projects.find(p => p.id === id);
     if (!project) return;
-
     setProjects(prev => prev.map(p => 
       p.id === id ? { ...p, status: 'processing', error: undefined, processingTime: undefined, progress: 0 } : p
     ));
-
     startAnalysis(project);
   };
 
@@ -415,10 +397,8 @@ function App() {
     if (project?.previewUrl) {
       URL.revokeObjectURL(project.previewUrl);
     }
-    
     deleteProjectFromDB(id);
     setProjects(prev => prev.filter(p => p.id !== id));
-    
     if (activeProjectId === id) {
       setActiveProjectId(null);
       setChatMessages([]);
@@ -428,40 +408,61 @@ function App() {
 
   const handleSeek = (seconds: number) => {
     if (mediaRef.current) {
-      mediaRef.current.currentTime = seconds;
+      mediaRef.current.currentTime = Math.max(0, seconds);
       mediaRef.current.play();
     }
   };
   
   const handleViewProject = (id: string) => {
+    const project = projects.find(p => p.id === id);
     setActiveProjectId(id);
-    setCurrentTime(0); // Reset time when viewing new project
+    setCurrentTime(0);
+    setChatMessages(project?.chatHistory || []);
   };
 
   const handleChatMessage = async (text: string) => {
     if (!activeProject) return;
 
-    const newMsg: ChatMessage = { role: 'user', text };
-    const updatedHistory = [...chatMessages, newMsg];
+    const userMsg: ChatMessage = { role: 'user', text };
+    const updatedHistory = [...chatMessages, userMsg];
+    
+    // Update local state immediately for responsiveness
     setChatMessages(updatedHistory);
     setIsChatLoading(true);
 
     try {
       const base64 = await readFileAsBase64(activeProject.file);
       const response = await askVideoQuestion(base64, activeProject.mimeType, text, updatedHistory);
-      setChatMessages(prev => [...prev, { role: 'model', text: response }]);
+      const modelMsg: ChatMessage = { role: 'model', text: response };
+      const finalHistory = [...updatedHistory, modelMsg];
+      
+      setChatMessages(finalHistory);
+
+      // Persist the history to the project object and DB
+      setProjects(prev => {
+        const updated = prev.map(p => {
+          if (p.id === activeProject.id) {
+            const updatedProject = { ...p, chatHistory: finalHistory };
+            saveProject(updatedProject); // Save updated project to DB
+            return updatedProject;
+          }
+          return p;
+        });
+        return updated;
+      });
+
     } catch (err) {
       console.error(err);
-      setChatMessages(prev => [...prev, { role: 'model', text: "Sorry, I encountered an error answering that." }]);
+      const errorMsg: ChatMessage = { role: 'model', text: "Sorry, I encountered an error answering that." };
+      setChatMessages(prev => [...prev, errorMsg]);
     } finally {
       setIsChatLoading(false);
     }
   };
 
+  // Fixed handleDownloadMediaWithCaptions to use correct srtBlob name
   const handleDownloadMediaWithCaptions = () => {
     if (!activeProject || !activeProject.data) return;
-
-    // 1. Trigger Media Download
     const a = document.createElement('a');
     a.href = activeProject.previewUrl || '';
     a.download = activeProject.fileName;
@@ -469,13 +470,11 @@ function App() {
     a.click();
     document.body.removeChild(a);
 
-    // 2. Trigger Caption Download (SRT)
     const srtContent = generateExportContent(activeProject.data.transcript, 'srt');
     const srtBlob = new Blob([srtContent], { type: 'text/plain' });
     const srtUrl = URL.createObjectURL(srtBlob);
     const srtLink = document.createElement('a');
     srtLink.href = srtUrl;
-    // Name it same as video but .srt
     const srtName = activeProject.fileName.substring(0, activeProject.fileName.lastIndexOf('.')) + '.srt';
     srtLink.download = srtName;
     document.body.appendChild(srtLink);
@@ -511,7 +510,6 @@ function App() {
     <div className="min-h-screen flex flex-col bg-gray-50 relative">
       <NotificationToast notifications={notifications} onDismiss={dismissNotification} />
 
-      {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div 
@@ -525,7 +523,6 @@ function App() {
           </div>
           
           <div className="flex items-center gap-4">
-             {/* Navigation Links */}
              {activeProjectId ? (
                 <button 
                   onClick={navigateToDashboard}
@@ -548,10 +545,7 @@ function App() {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
-        
-        {/* State 1: Landing / Empty State */}
         {!activeProjectId && !showUpload && view === 'landing' && (
           <div className="flex flex-col items-center justify-center min-h-[60vh] animate-fade-in">
              <div className="text-center max-w-2xl mb-8">
@@ -561,8 +555,6 @@ function App() {
                <p className="text-lg text-gray-500">
                  Upload a video or audio file to generate transcripts, summaries, and insights powered by Gemini.
                </p>
-               
-               {/* Link to Dashboard for landing page */}
                <div className="mt-4 flex justify-center gap-4">
                   <button 
                      onClick={navigateToDashboard}
@@ -578,7 +570,6 @@ function App() {
           </div>
         )}
 
-        {/* State 3: Dashboard */}
         {!activeProjectId && view === 'dashboard' && (
           <>
             <Dashboard 
@@ -590,7 +581,6 @@ function App() {
               onNewUpload={() => setShowUpload(true)}
             />
             
-            {/* Modal for Upload */}
             {showUpload && (
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
                 <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden animate-fade-in-up">
@@ -616,22 +606,21 @@ function App() {
           </>
         )}
 
-        {/* State 4: Project Detail View */}
         {activeProjectId && activeProject && activeProject.status === 'completed' && activeProject.data && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-fade-in-up">
-            {/* Left Column: Media & Chat */}
             <div className="lg:col-span-7 space-y-6">
-              {/* Media Player */}
               <div className="bg-black rounded-2xl shadow-xl overflow-hidden ring-1 ring-gray-900/5">
                 <VideoPlayer 
                    src={activeProject.previewUrl || ''} 
                    type={activeProject.mediaType}
                    ref={mediaRef}
                    onTimeUpdate={setCurrentTime}
+                   chapters={activeProject.data.chapters}
+                   onSeek={handleSeek}
+                   currentTime={currentTime}
                 />
               </div>
 
-              {/* Actions Bar */}
               <div className="flex gap-3 overflow-x-auto pb-2">
                  <button 
                    onClick={handleDownloadMediaWithCaptions}
@@ -642,7 +631,6 @@ function App() {
                  </button>
               </div>
 
-              {/* Summary Card */}
               <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                 <div className="flex items-center gap-2 mb-4">
                   <span className="material-icons-round text-brand-500">summarize</span>
@@ -664,7 +652,6 @@ function App() {
                 </div>
               </div>
 
-               {/* Chat Interface */}
                <ChatInterface 
                 messages={chatMessages}
                 onSendMessage={handleChatMessage}
@@ -672,10 +659,10 @@ function App() {
               />
             </div>
 
-            {/* Right Column: Transcript */}
             <div className="lg:col-span-5 h-[calc(100vh-8rem)] sticky top-24">
                <TranscriptList 
                  transcript={activeProject.data.transcript} 
+                 chapters={activeProject.data.chapters}
                  onSeek={handleSeek}
                  currentTime={currentTime}
                />
