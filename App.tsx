@@ -47,17 +47,25 @@ function App() {
     };
   }, [projects]);
 
-  // Centralized save/update function to ensure persistence
+  // Pure state update function
   const updateProjectState = useCallback((id: string, updates: Partial<VideoProject>) => {
-    setProjects(prev => {
-      const next = prev.map(p => p.id === id ? { ...p, ...updates } : p);
-      const updatedProject = next.find(p => p.id === id);
-      if (updatedProject) {
-        saveProject(updatedProject); // Persist to IndexedDB
-      }
-      return next;
-    });
+    setProjects(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
   }, []);
+
+  // Persistence wrapper to ensure state and DB are in sync
+  const updateAndSaveProject = useCallback(async (id: string, updates: Partial<VideoProject>) => {
+    updateProjectState(id, updates);
+    
+    // We get the latest project object from the updated state context
+    // Since setProjects is async, we manually construct the object to save to DB
+    setProjects(prev => {
+      const project = prev.find(p => p.id === id);
+      if (project) {
+        saveProject(project);
+      }
+      return prev;
+    });
+  }, [updateProjectState]);
 
   useEffect(() => {
     const loadProjects = async () => {
@@ -114,7 +122,7 @@ function App() {
     const startTime = Date.now();
 
     try {
-      updateProjectState(project.id, { progress: 20 });
+      await updateAndSaveProject(project.id, { progress: 20 });
       
       const reader = new FileReader();
       const base64Promise = new Promise<string>((resolve, reject) => {
@@ -124,30 +132,26 @@ function App() {
       });
       const base64Data = await base64Promise;
       
-      updateProjectState(project.id, { progress: 45 });
+      await updateAndSaveProject(project.id, { progress: 45 });
       
       const result = await analyzeVideo(base64Data, project.mimeType, controller.signal);
       
-      updateProjectState(project.id, { progress: 90 });
+      await updateAndSaveProject(project.id, { progress: 90 });
       
       const completedUpdates: Partial<VideoProject> = { 
         status: 'completed', 
-        data: result, // This object contains summary, topics, chapters, and transcript
+        data: result,
         progress: 100, 
         processingTime: Date.now() - startTime,
         chatHistory: [] 
       };
       
-      updateProjectState(project.id, completedUpdates);
+      await updateAndSaveProject(project.id, completedUpdates);
       addNotification('success', `"${project.fileName}" analysis complete.`);
     } catch (error: any) {
-      if (error.name === 'AbortError') {
-        updateProjectState(project.id, { status: 'failed', error: 'Transcription cancelled', progress: 0 });
-        addNotification('error', `Cancelled: ${project.fileName}`);
-      } else {
-        updateProjectState(project.id, { status: 'failed', error: error.message, progress: 0 });
-        addNotification('error', `Failed: ${project.fileName}`);
-      }
+      const errorMsg = error.name === 'AbortError' ? 'Transcription cancelled' : error.message;
+      await updateAndSaveProject(project.id, { status: 'failed', error: errorMsg, progress: 0 });
+      addNotification('error', `${error.name === 'AbortError' ? 'Cancelled' : 'Failed'}: ${project.fileName}`);
     } finally {
       abortControllers.current.delete(project.id);
     }
@@ -177,20 +181,20 @@ function App() {
     };
     
     setProjects(prev => [newProject, ...prev]);
-    saveProject(newProject);
+    await saveProject(newProject);
     setActiveTab('dashboard');
     startAnalysis(newProject);
   };
 
-  const handleRetry = (id: string) => {
+  const handleRetry = async (id: string) => {
     const project = projects.find(p => p.id === id);
     if (!project) return;
     
-    updateProjectState(id, { status: 'processing', progress: 5, error: undefined });
-    startAnalysis({ ...project, status: 'processing' });
+    await updateAndSaveProject(id, { status: 'processing', progress: 5, error: undefined });
+    startAnalysis({ ...project, status: 'processing', progress: 5, error: undefined });
   };
 
-  const handleCancel = (id: string) => {
+  const handleCancel = async (id: string) => {
     const controller = abortControllers.current.get(id);
     if (controller) {
       controller.abort();
@@ -202,7 +206,7 @@ function App() {
     const userMsg: ChatMessage = { role: 'user', text };
     const updatedHistory = [...(activeProject.chatHistory || []), userMsg];
 
-    updateProjectState(activeProject.id, { chatHistory: updatedHistory });
+    await updateAndSaveProject(activeProject.id, { chatHistory: updatedHistory });
     setIsChatLoading(true);
 
     try {
@@ -216,7 +220,7 @@ function App() {
       const modelMsg: ChatMessage = { role: 'model', text: response };
       const finalHistory = [...updatedHistory, modelMsg];
       
-      updateProjectState(activeProject.id, { chatHistory: finalHistory });
+      await updateAndSaveProject(activeProject.id, { chatHistory: finalHistory });
     } catch (err) {
       addNotification('error', "Chat failed to connect.");
     } finally {

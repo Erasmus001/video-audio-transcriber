@@ -53,12 +53,12 @@ export const analyzeVideo = async (
         items: {
           type: Type.OBJECT,
           properties: {
-            timestamp: { type: Type.STRING, description: "Timestamp in MM:SS format." },
-            text: { type: Type.STRING, description: "The spoken content or description of events at this time." },
+            timestamp: { type: Type.STRING, description: "Start time for this segment in MM:SS format." },
+            text: { type: Type.STRING, description: "The EXACT VERBATIM spoken content for this segment. Do NOT summarize." },
           },
           propertyOrdering: ["timestamp", "text"],
         },
-        description: "A detailed transcript of the audio/video.",
+        description: "A word-for-word, verbatim transcript of the media.",
       },
     },
     propertyOrdering: ["summary", "topics", "chapters", "transcript"],
@@ -81,14 +81,14 @@ export const analyzeVideo = async (
             },
           },
           {
-            text: "Analyze this media file. Provide a detailed transcript with timestamps, a comprehensive summary, key topics discussed, and major chapters or segments with their titles and start times.",
+            text: "Generate a word-for-word, verbatim transcript for this file. It is critical that the transcript segments represent exactly what was said without any summarization or paraphrasing. Additionally, provide a high-level summary, key topics, and major chapters for navigation.",
           },
         ],
       },
       config: {
         responseMimeType: "application/json",
         responseSchema: schema,
-        systemInstruction: "You are an expert transcriber and analyst. Your goal is to provide accurate, well-formatted transcripts, insightful summaries, and clear chapter divisions for both audio and video inputs.",
+        systemInstruction: "You are a professional stenographer and media analyst. Your primary goal is to provide 100% accurate, verbatim, word-for-word transcripts. You must not summarize the spoken content within the transcript segments. Summaries should only be provided in the dedicated summary field.",
       },
     });
 

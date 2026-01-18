@@ -1,7 +1,8 @@
+
 import { VideoAnalysisData, CachedProject, VideoProject } from '../types';
 
 const DB_NAME = 'VideoScripterDB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_TRANSCRIPTS = 'transcripts';
 const STORE_PROJECTS = 'projects';
 
@@ -26,7 +27,7 @@ const openDB = (): Promise<IDBDatabase> => {
   });
 };
 
-// --- Transcript Caching (Existing) ---
+// --- Transcript Caching ---
 
 export const generateCacheKey = (fileName: string, fileSize: number, duration: number): string => {
   return `${fileName}_${fileSize}_${Math.round(duration)}`;
@@ -87,15 +88,20 @@ export const cacheTranscript = async (
   }
 };
 
-// --- Project Persistence (New) ---
+// --- Project Persistence ---
 
 export const saveProject = async (project: VideoProject): Promise<void> => {
   try {
     const db = await openDB();
     
-    // Create a copy to store, removing session-specific data like URL.createObjectURL results
-    // Structured clone algorithm in IDB handles File/Blob objects automatically.
-    const projectToStore = { ...project };
+    // Create a copy to store, removing session-specific data like URL.createObjectURL results.
+    // IndexedDB handles File/Blob objects natively using the structured clone algorithm.
+    const projectToStore = { 
+      ...project,
+      // Ensure specific deep copies for critical data to avoid reference issues
+      data: project.data ? JSON.parse(JSON.stringify(project.data)) : undefined,
+      chatHistory: project.chatHistory ? JSON.parse(JSON.stringify(project.chatHistory)) : []
+    };
     delete projectToStore.previewUrl;
 
     return new Promise((resolve, reject) => {
@@ -103,11 +109,17 @@ export const saveProject = async (project: VideoProject): Promise<void> => {
       const store = transaction.objectStore(STORE_PROJECTS);
       const request = store.put(projectToStore);
 
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        console.debug(`Project ${project.id} saved successfully to IndexedDB.`);
+        resolve();
+      };
+      request.onerror = () => {
+        console.error(`Failed to save project ${project.id} to IndexedDB:`, request.error);
+        reject(request.error);
+      };
     });
   } catch (error) {
-    console.error('Error saving project to IndexedDB:', error);
+    console.error('CRITICAL: Error saving project to IndexedDB:', error);
   }
 };
 
