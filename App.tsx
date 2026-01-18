@@ -4,6 +4,7 @@ import Sidebar from './components/Sidebar';
 import DashboardView from './components/DashboardView';
 import TranscriptsView from './components/TranscriptsView';
 import ProjectDetailView from './components/ProjectDetailView';
+import FilesView from './components/FilesView';
 import NotificationToast, { Notification } from './components/NotificationToast';
 import { analyzeVideo, askVideoQuestion } from './services/geminiService';
 import { getCachedTranscript, cacheTranscript, saveProject, getAllProjects, deleteProjectFromDB } from './services/dbService';
@@ -275,11 +276,14 @@ function App() {
                 />
               )}
               {activeTab === 'files' && (
-                <div className="flex flex-col items-center justify-center h-[60vh] text-gray-400">
-                  <span className="material-icons-round text-6xl mb-4">folder</span>
-                  <p className="text-xl font-medium">Internal Storage</p>
-                  <p className="text-sm">Manage source media and transcription assets.</p>
-                </div>
+                <FilesView 
+                  projects={projects}
+                  onView={(id) => {
+                    setActiveProjectId(id);
+                    setActiveTab('transcripts');
+                  }}
+                  onDelete={handleDelete}
+                />
               )}
               {activeTab === 'settings' && (
                 <div className="max-w-2xl bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
