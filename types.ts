@@ -23,18 +23,11 @@ export interface ChatMessage {
   text: string;
 }
 
-export enum AppState {
-  IDLE,
-  PROCESSING,
-  ANALYZED,
-  ERROR
-}
-
 export type ProjectStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
 export interface VideoProject {
   id: string;
-  file: File | Blob; // Can be a File object or a Blob from URL
+  file: File | Blob;
   fileName: string;
   fileSize: number;
   mimeType: string;
@@ -44,17 +37,16 @@ export interface VideoProject {
   data?: VideoAnalysisData;
   error?: string;
   previewUrl?: string;
-  duration?: number; // Duration in seconds
-  processingTime?: number; // Time taken to process in ms
-  sourceUrl?: string; // Original URL if uploaded via link
-  progress?: number; // 0-100 progress for processing
-  chatHistory?: ChatMessage[]; // Persisted chat conversation
+  duration?: number;
+  processingTime?: number;
+  progress?: number;
+  chatHistory?: ChatMessage[];
 }
 
 export type ExportFormat = 'json' | 'txt' | 'srt';
 
 export interface CachedProject {
-  id: string; // Composite key: name_size_duration
+  id: string;
   data: VideoAnalysisData;
   createdAt: number;
   fileName: string;

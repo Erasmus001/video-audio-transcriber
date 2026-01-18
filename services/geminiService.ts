@@ -2,6 +2,8 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { VideoAnalysisData, TranscriptSegment, ExportFormat } from "../types";
 
+const MODEL_NAME = 'gemini-3-flash-preview';
+
 // Helper to calculate seconds from timestamp string "MM:SS" or "HH:MM:SS"
 const parseTimestamp = (timestamp: string): number => {
   const parts = timestamp.split(':').map(Number);
@@ -69,7 +71,7 @@ export const analyzeVideo = async (
     }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: MODEL_NAME,
       contents: {
         parts: [
           {
@@ -139,7 +141,7 @@ export const askVideoQuestion = async (
   
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: MODEL_NAME,
       contents: {
         parts: [
           {
@@ -174,18 +176,15 @@ export const generateExportContent = (transcript: TranscriptSegment[], format: E
   
   if (format === 'srt') {
     return transcript.map((seg, index) => {
-      // Very basic SRT timestamp formatting for demo purposes
-      // Needs to convert seconds to HH:MM:SS,mmm
       const formatSrtTime = (seconds: number) => {
         const h = Math.floor(seconds / 3600);
         const m = Math.floor((seconds % 3600) / 60);
         const s = Math.floor(seconds % 60);
-        const ms = 0; // Simplified
+        const ms = 0; 
         return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},000`;
       };
       
       const start = formatSrtTime(seg.seconds);
-      // Estimate end time (next segment or +3s)
       const nextSeg = transcript[index + 1];
       const end = nextSeg ? formatSrtTime(nextSeg.seconds) : formatSrtTime(seg.seconds + 3);
       

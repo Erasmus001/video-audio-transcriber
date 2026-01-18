@@ -27,14 +27,14 @@ const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     }
   };
 
-  const handleDownload = () => {
+  const handleDownloadDefault = () => {
     if (!project.data) return;
-    const content = generateExportContent(project.data.transcript, 'txt');
+    const content = generateExportContent(project.data.transcript, 'srt');
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${project.fileName}_transcript.txt`;
+    a.download = `${project.fileName}.srt`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -59,11 +59,11 @@ const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
           <span className="font-bold text-gray-900">{project.fileName}</span>
         </div>
         <button 
-          onClick={handleDownload}
-          className="bg-white border border-gray-100 text-gray-900 px-5 py-2 rounded-xl hover:bg-gray-50 transition-all shadow-sm font-bold text-xs flex items-center gap-2"
+          onClick={handleDownloadDefault}
+          className="bg-brand-600 text-white px-5 py-2 rounded-xl hover:bg-brand-700 transition-all shadow-sm font-bold text-xs flex items-center gap-2"
         >
           <span className="material-icons-round text-sm">download</span>
-          Download
+          Download SRT
         </button>
       </div>
 
@@ -78,7 +78,6 @@ const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
             />
           </div>
 
-          {/* Chapters Section */}
           {project.data?.chapters && project.data.chapters.length > 0 && (
             <div className="flex flex-col gap-3 shrink-0">
               <div className="flex items-center justify-between px-1">
@@ -102,13 +101,11 @@ const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                       <div className={`absolute inset-0 transition-colors duration-300 ${
                         idx === activeChapterIndex ? 'bg-brand-500/10' : 'bg-brand-500/5 group-hover:bg-brand-500/10'
                       }`}></div>
-                      
                       <span className={`material-icons-round transition-all duration-300 text-2xl ${
                         idx === activeChapterIndex ? 'text-brand-600 scale-110' : 'text-gray-300 group-hover:text-brand-300'
                       }`}>
                         {idx === activeChapterIndex ? 'pause_circle' : 'play_circle'}
                       </span>
-                      
                       <div className="absolute bottom-1.5 right-1.5 bg-black/70 backdrop-blur-sm text-white text-[9px] px-1.5 py-0.5 rounded-md font-bold font-mono tracking-tight">
                         {chapter.timestamp}
                       </div>

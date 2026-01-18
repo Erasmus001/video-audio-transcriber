@@ -7,9 +7,11 @@ interface TranscriptsViewProps {
   onView: (id: string) => void;
   onDelete: (id: string) => void;
   onFileSelect: (file: File) => void;
+  onRetry: (id: string) => void;
+  onCancel: (id: string) => void;
 }
 
-const TranscriptsView: React.FC<TranscriptsViewProps> = ({ projects, onView, onDelete, onFileSelect }) => {
+const TranscriptsView: React.FC<TranscriptsViewProps> = ({ projects, onView, onDelete, onFileSelect, onRetry, onCancel }) => {
   const [tab, setTab] = useState<'all' | 'video' | 'audio'>('all');
   const [search, setSearch] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -76,12 +78,34 @@ const TranscriptsView: React.FC<TranscriptsViewProps> = ({ projects, onView, onD
                  <span className="material-icons-round text-4xl text-brand-100 group-hover:text-brand-300 transition-colors">audiotrack</span>
                )}
                <div className="absolute inset-0 bg-black/10 group-hover:bg-transparent transition-all"></div>
-               <button 
-                onClick={() => onView(p.id)}
-                className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-brand-900/40 text-white"
-               >
-                 <span className="material-icons-round text-3xl">play_circle</span>
-               </button>
+               {p.status === 'completed' ? (
+                 <button 
+                  onClick={() => onView(p.id)}
+                  className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-brand-900/40 text-white"
+                 >
+                   <span className="material-icons-round text-3xl">play_circle</span>
+                 </button>
+               ) : p.status === 'failed' ? (
+                 <button 
+                  onClick={() => onRetry(p.id)}
+                  className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-red-900/40 text-white"
+                 >
+                   <span className="material-icons-round text-3xl">refresh</span>
+                 </button>
+               ) : (
+                 <div className="absolute inset-0 flex items-center justify-center bg-brand-900/20 text-white">
+                   <div className="relative flex flex-col items-center gap-2">
+                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                     <button 
+                       onClick={(e) => { e.stopPropagation(); onCancel(p.id); }}
+                       className="p-1 bg-white/20 hover:bg-white/40 rounded-full transition-colors"
+                       title="Cancel"
+                     >
+                       <span className="material-icons-round text-sm">close</span>
+                     </button>
+                   </div>
+                 </div>
+               )}
             </div>
             <div className="p-4 flex-1 flex flex-col justify-between">
               <div>
@@ -89,6 +113,9 @@ const TranscriptsView: React.FC<TranscriptsViewProps> = ({ projects, onView, onD
                 <p className="text-[10px] text-gray-400 mt-1">
                   Created {new Date(p.createdAt).toLocaleDateString()}
                 </p>
+                {p.status === 'failed' && (
+                  <p className="text-[10px] text-red-500 mt-1 font-medium italic">Transcription failed</p>
+                )}
               </div>
               <div className="mt-4 flex items-center justify-between pt-4 border-t border-gray-50">
                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${p.mediaType === 'video' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>

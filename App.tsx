@@ -11,22 +11,19 @@ import { VideoProject, ChatMessage } from './types';
 
 export type NavTab = 'dashboard' | 'transcripts' | 'files' | 'settings';
 
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+
 function App() {
   const [projects, setProjects] = useState<VideoProject[]>([]);
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [isLoadingDB, setIsLoadingDB] = useState(true);
-  
-  // Notification State
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  
-  // UI state for active session
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   
   const abortControllers = useRef<Map<string, AbortController>>(new Map());
 
-  // Derived state: the current project is found directly from the projects array
   const activeProject = useMemo(() => 
     projects.find(p => p.id === activeProjectId), 
     [projects, activeProjectId]
@@ -35,6 +32,7 @@ function App() {
   const stats = useMemo(() => {
     const totalSize = projects.reduce((acc, p) => acc + p.fileSize, 0);
     const totalSeconds = projects.reduce((acc, p) => acc + (p.duration || 0), 0);
+    const processingCount = projects.filter(p => p.status === 'processing' || p.status === 'queued').length;
     const hrs = Math.floor(totalSeconds / 3600);
     const mins = Math.floor((totalSeconds % 3600) / 60);
     
@@ -42,24 +40,23 @@ function App() {
       count: projects.length,
       hours: hrs,
       minutes: mins,
-      sizeGB: (totalSize / (1024 * 1024 * 1024)).toFixed(1)
+      sizeGB: (totalSize / (1024 * 1024 * 1024)).toFixed(2),
+      active: processingCount
     };
   }, [projects]);
 
-  // Load projects from DB on mount
   useEffect(() => {
     const loadProjects = async () => {
       try {
         const savedProjects = await getAllProjects();
         const hydratedProjects = savedProjects.map(p => {
           const updatedProject = { ...p };
-          if (p.file && (p.file instanceof Blob || (p.file as any) instanceof File)) {
+          if (p.file) {
             updatedProject.previewUrl = URL.createObjectURL(p.file);
           }
-          // Reset interrupted processing status
-          if (p.status === 'processing') {
+          if (p.status === 'processing' || p.status === 'queued') {
             updatedProject.status = 'failed';
-            updatedProject.error = 'Analysis interrupted';
+            updatedProject.error = 'Interrupted';
             saveProject(updatedProject);
           }
           return updatedProject;
@@ -80,49 +77,83 @@ function App() {
     setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 5000);
   };
 
+  const getMediaDuration = (file: File | Blob): Promise<number> => {
+    return new Promise((resolve) => {
+      const element = document.createElement(file.type.startsWith('audio/') ? 'audio' : 'video');
+      const url = URL.createObjectURL(file);
+      element.src = url;
+      element.onloadedmetadata = () => {
+        URL.revokeObjectURL(url);
+        resolve(element.duration);
+      };
+      element.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(0);
+      };
+    });
+  };
+
   const startAnalysis = async (project: VideoProject) => {
     const controller = new AbortController();
     abortControllers.current.set(project.id, controller);
-    
-    try {
-      if (project.duration) {
-        const cached = await getCachedTranscript(project.fileName, project.fileSize, project.duration);
-        if (cached) {
-          const completed = { ...project, status: 'completed' as const, data: cached.data, progress: 100 };
-          setProjects(prev => prev.map(p => p.id === project.id ? completed : p));
-          saveProject(completed);
-          addNotification('success', `"${project.fileName}" restored from cache.`);
-          return;
-        }
-      }
+    const startTime = Date.now();
 
+    const updateProjectState = (updates: Partial<VideoProject>) => {
+      setProjects(prev => {
+        const newProjects = prev.map(p => p.id === project.id ? { ...p, ...updates } : p);
+        const updated = newProjects.find(p => p.id === project.id);
+        if (updated) saveProject(updated);
+        return newProjects;
+      });
+    };
+
+    try {
+      updateProjectState({ progress: 20 });
+      
       const reader = new FileReader();
       const base64Promise = new Promise<string>((resolve, reject) => {
         reader.onload = () => resolve((reader.result as string).split(',')[1]);
         reader.onerror = reject;
         reader.readAsDataURL(project.file);
       });
-
       const base64Data = await base64Promise;
+      
+      updateProjectState({ progress: 45 });
+      
       const result = await analyzeVideo(base64Data, project.mimeType, controller.signal);
       
-      if (project.duration) await cacheTranscript(project.fileName, project.fileSize, project.duration, result);
-
-      const completed = { ...project, status: 'completed' as const, data: result, progress: 100, chatHistory: [] };
-      setProjects(prev => prev.map(p => p.id === project.id ? completed : p));
-      saveProject(completed);
-      addNotification('success', `"${project.fileName}" transcription complete.`);
+      updateProjectState({ progress: 90 });
+      
+      const completed: Partial<VideoProject> = { 
+        status: 'completed', 
+        data: result, 
+        progress: 100, 
+        processingTime: Date.now() - startTime,
+        chatHistory: [] 
+      };
+      
+      updateProjectState(completed);
+      addNotification('success', `"${project.fileName}" completed.`);
     } catch (error: any) {
-      if (error.name !== 'AbortError') {
-        const failed = { ...project, status: 'failed' as const, error: error.message };
-        setProjects(prev => prev.map(p => p.id === project.id ? failed : p));
-        saveProject(failed);
-        addNotification('error', `Failed to transcribe "${project.fileName}".`);
+      if (error.name === 'AbortError') {
+        updateProjectState({ status: 'failed', error: 'Transcription cancelled', progress: 0 });
+        addNotification('error', `Cancelled: ${project.fileName}`);
+      } else {
+        updateProjectState({ status: 'failed', error: error.message, progress: 0 });
+        addNotification('error', `Failed: ${project.fileName}`);
       }
+    } finally {
+      abortControllers.current.delete(project.id);
     }
   };
 
   const handleFileSelect = async (file: File) => {
+    if (file.size > MAX_FILE_SIZE) {
+      addNotification('error', `File too large (Max 50MB). This file is ${(file.size / (1024 * 1024)).toFixed(1)}MB.`);
+      return;
+    }
+
+    const duration = await getMediaDuration(file);
     const type = file.type.startsWith('audio/') ? 'audio' : 'video';
     const newProject: VideoProject = {
       id: Math.random().toString(36).substring(2, 9),
@@ -134,26 +165,40 @@ function App() {
       status: 'processing',
       createdAt: Date.now(),
       previewUrl: URL.createObjectURL(file),
-      progress: 10,
-      chatHistory: []
+      progress: 5,
+      chatHistory: [],
+      duration
     };
+    
     setProjects(prev => [newProject, ...prev]);
+    saveProject(newProject);
     setActiveTab('dashboard');
     startAnalysis(newProject);
   };
 
+  const handleRetry = (id: string) => {
+    const project = projects.find(p => p.id === id);
+    if (!project) return;
+    
+    const restarted = { ...project, status: 'processing' as const, progress: 5, error: undefined };
+    setProjects(prev => prev.map(p => p.id === id ? restarted : p));
+    saveProject(restarted);
+    startAnalysis(restarted);
+  };
+
+  const handleCancel = (id: string) => {
+    const controller = abortControllers.current.get(id);
+    if (controller) {
+      controller.abort();
+    }
+  };
+
   const handleChatMessage = async (text: string) => {
     if (!activeProject) return;
-    
     const userMsg: ChatMessage = { role: 'user', text };
-    const currentHistory = activeProject.chatHistory || [];
-    const updatedHistory = [...currentHistory, userMsg];
+    const updatedHistory = [...(activeProject.chatHistory || []), userMsg];
 
-    // Optimistically update the UI and projects list
-    setProjects(prev => prev.map(p => 
-      p.id === activeProject.id ? { ...p, chatHistory: updatedHistory } : p
-    ));
-    
+    setProjects(prev => prev.map(p => p.id === activeProject.id ? { ...p, chatHistory: updatedHistory } : p));
     setIsChatLoading(true);
 
     try {
@@ -167,18 +212,14 @@ function App() {
       const modelMsg: ChatMessage = { role: 'model', text: response };
       const finalHistory = [...updatedHistory, modelMsg];
       
-      // Update state with model response
-      setProjects(prev => prev.map(p => 
-        p.id === activeProject.id ? { ...p, chatHistory: finalHistory } : p
-      ));
-      
-      // Persist the entire updated history to IndexedDB
-      await saveProject({ ...activeProject, chatHistory: finalHistory });
+      setProjects(prev => {
+        const next = prev.map(p => p.id === activeProject.id ? { ...p, chatHistory: finalHistory } : p);
+        const p = next.find(x => x.id === activeProjectId);
+        if (p) saveProject(p);
+        return next;
+      });
     } catch (err) {
-      const errorMsg: ChatMessage = { role: 'model', text: "Sorry, I encountered an error processing your request." };
-      setProjects(prev => prev.map(p => 
-        p.id === activeProject.id ? { ...p, chatHistory: [...updatedHistory, errorMsg] } : p
-      ));
+      addNotification('error', "Chat failed to connect.");
     } finally {
       setIsChatLoading(false);
     }
@@ -197,11 +238,7 @@ function App() {
   return (
     <div className="flex h-screen bg-white text-gray-900 font-sans overflow-hidden">
       <NotificationToast notifications={notifications} onDismiss={(id) => setNotifications(n => n.filter(x => x.id !== id))} />
-      
-      <Sidebar 
-        activeTab={activeTab} 
-        onTabChange={(tab) => { setActiveTab(tab); setActiveProjectId(null); }} 
-      />
+      <Sidebar activeTab={activeTab} onTabChange={(tab) => { setActiveTab(tab); setActiveProjectId(null); }} />
 
       <main className="flex-1 overflow-y-auto bg-gray-50/50">
         <div className="p-8 max-w-[1600px] mx-auto">
@@ -219,10 +256,12 @@ function App() {
               {activeTab === 'dashboard' && (
                 <DashboardView 
                   stats={stats}
-                  recentProjects={projects.slice(0, 7)}
+                  recentProjects={projects.slice(0, 10)}
                   onView={(id) => setActiveProjectId(id)}
                   onDelete={handleDelete}
                   onFileSelect={handleFileSelect}
+                  onRetry={handleRetry}
+                  onCancel={handleCancel}
                 />
               )}
               {activeTab === 'transcripts' && (
@@ -231,29 +270,27 @@ function App() {
                   onView={(id) => setActiveProjectId(id)}
                   onDelete={handleDelete}
                   onFileSelect={handleFileSelect}
+                  onRetry={handleRetry}
+                  onCancel={handleCancel}
                 />
               )}
               {activeTab === 'files' && (
                 <div className="flex flex-col items-center justify-center h-[60vh] text-gray-400">
                   <span className="material-icons-round text-6xl mb-4">folder</span>
-                  <p className="text-xl font-medium">File Management System</p>
-                  <p className="text-sm">Manage source files and processed documents here.</p>
+                  <p className="text-xl font-medium">Internal Storage</p>
+                  <p className="text-sm">Manage source media and transcription assets.</p>
                 </div>
               )}
               {activeTab === 'settings' && (
                 <div className="max-w-2xl bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
-                  <h2 className="text-2xl font-bold mb-6">Settings</h2>
+                  <h2 className="text-2xl font-bold mb-6">Application Settings</h2>
                   <div className="space-y-4">
                     <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
                       <div>
-                        <p className="font-medium">Export Format</p>
-                        <p className="text-xs text-gray-500">Default format for transcript downloads</p>
+                        <p className="font-medium">Storage Usage</p>
+                        <p className="text-xs text-gray-500">IndexedDB local storage</p>
                       </div>
-                      <select className="bg-white border border-gray-200 rounded-lg px-3 py-1 text-sm">
-                        <option>SRT (Subtitles)</option>
-                        <option>TXT (Plain Text)</option>
-                        <option>JSON</option>
-                      </select>
+                      <p className="font-mono text-sm">{stats.sizeGB} GB</p>
                     </div>
                   </div>
                 </div>
