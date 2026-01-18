@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import DashboardView from './components/DashboardView';
 import TranscriptsView from './components/TranscriptsView';
@@ -8,7 +8,7 @@ import FilesView from './components/FilesView';
 import SettingsView from './components/SettingsView';
 import NotificationToast, { Notification } from './components/NotificationToast';
 import { analyzeVideo, askVideoQuestion } from './services/geminiService';
-import { getCachedTranscript, cacheTranscript, saveProject, getAllProjects, deleteProjectFromDB } from './services/dbService';
+import { saveProject, getAllProjects, deleteProjectFromDB } from './services/dbService';
 import { VideoProject, ChatMessage } from './types';
 
 export type NavTab = 'dashboard' | 'transcripts' | 'files' | 'settings';
@@ -47,6 +47,18 @@ function App() {
     };
   }, [projects]);
 
+  // Centralized save/update function to ensure persistence
+  const updateProjectState = useCallback((id: string, updates: Partial<VideoProject>) => {
+    setProjects(prev => {
+      const next = prev.map(p => p.id === id ? { ...p, ...updates } : p);
+      const updatedProject = next.find(p => p.id === id);
+      if (updatedProject) {
+        saveProject(updatedProject); // Persist to IndexedDB
+      }
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     const loadProjects = async () => {
       try {
@@ -56,9 +68,10 @@ function App() {
           if (p.file) {
             updatedProject.previewUrl = URL.createObjectURL(p.file);
           }
+          // If app closed during processing, mark as failed for user visibility
           if (p.status === 'processing' || p.status === 'queued') {
             updatedProject.status = 'failed';
-            updatedProject.error = 'Interrupted';
+            updatedProject.error = 'Session interrupted';
             saveProject(updatedProject);
           }
           return updatedProject;
@@ -100,17 +113,8 @@ function App() {
     abortControllers.current.set(project.id, controller);
     const startTime = Date.now();
 
-    const updateProjectState = (updates: Partial<VideoProject>) => {
-      setProjects(prev => {
-        const newProjects = prev.map(p => p.id === project.id ? { ...p, ...updates } : p);
-        const updated = newProjects.find(p => p.id === project.id);
-        if (updated) saveProject(updated);
-        return newProjects;
-      });
-    };
-
     try {
-      updateProjectState({ progress: 20 });
+      updateProjectState(project.id, { progress: 20 });
       
       const reader = new FileReader();
       const base64Promise = new Promise<string>((resolve, reject) => {
@@ -120,28 +124,28 @@ function App() {
       });
       const base64Data = await base64Promise;
       
-      updateProjectState({ progress: 45 });
+      updateProjectState(project.id, { progress: 45 });
       
       const result = await analyzeVideo(base64Data, project.mimeType, controller.signal);
       
-      updateProjectState({ progress: 90 });
+      updateProjectState(project.id, { progress: 90 });
       
-      const completed: Partial<VideoProject> = { 
+      const completedUpdates: Partial<VideoProject> = { 
         status: 'completed', 
-        data: result, 
+        data: result, // This object contains summary, topics, chapters, and transcript
         progress: 100, 
         processingTime: Date.now() - startTime,
         chatHistory: [] 
       };
       
-      updateProjectState(completed);
-      addNotification('success', `"${project.fileName}" completed.`);
+      updateProjectState(project.id, completedUpdates);
+      addNotification('success', `"${project.fileName}" analysis complete.`);
     } catch (error: any) {
       if (error.name === 'AbortError') {
-        updateProjectState({ status: 'failed', error: 'Transcription cancelled', progress: 0 });
+        updateProjectState(project.id, { status: 'failed', error: 'Transcription cancelled', progress: 0 });
         addNotification('error', `Cancelled: ${project.fileName}`);
       } else {
-        updateProjectState({ status: 'failed', error: error.message, progress: 0 });
+        updateProjectState(project.id, { status: 'failed', error: error.message, progress: 0 });
         addNotification('error', `Failed: ${project.fileName}`);
       }
     } finally {
@@ -182,10 +186,8 @@ function App() {
     const project = projects.find(p => p.id === id);
     if (!project) return;
     
-    const restarted = { ...project, status: 'processing' as const, progress: 5, error: undefined };
-    setProjects(prev => prev.map(p => p.id === id ? restarted : p));
-    saveProject(restarted);
-    startAnalysis(restarted);
+    updateProjectState(id, { status: 'processing', progress: 5, error: undefined });
+    startAnalysis({ ...project, status: 'processing' });
   };
 
   const handleCancel = (id: string) => {
@@ -200,7 +202,7 @@ function App() {
     const userMsg: ChatMessage = { role: 'user', text };
     const updatedHistory = [...(activeProject.chatHistory || []), userMsg];
 
-    setProjects(prev => prev.map(p => p.id === activeProject.id ? { ...p, chatHistory: updatedHistory } : p));
+    updateProjectState(activeProject.id, { chatHistory: updatedHistory });
     setIsChatLoading(true);
 
     try {
@@ -214,12 +216,7 @@ function App() {
       const modelMsg: ChatMessage = { role: 'model', text: response };
       const finalHistory = [...updatedHistory, modelMsg];
       
-      setProjects(prev => {
-        const next = prev.map(p => p.id === activeProject.id ? { ...p, chatHistory: finalHistory } : p);
-        const p = next.find(x => x.id === activeProjectId);
-        if (p) saveProject(p);
-        return next;
-      });
+      updateProjectState(activeProject.id, { chatHistory: finalHistory });
     } catch (err) {
       addNotification('error', "Chat failed to connect.");
     } finally {
