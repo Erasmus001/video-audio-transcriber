@@ -45,12 +45,12 @@ const FilesView: React.FC<FilesViewProps> = ({ projects, onView, onDelete }) => 
       </div>
 
       <div className="bg-white p-10 rounded-3xl border border-gray-100 shadow-sm flex flex-col sm:flex-row items-center gap-16 transition-all hover:shadow-md">
-        <div className="relative w-40 h-40 shrink-0">
-          <svg className="w-full h-full transform -rotate-90">
+        <div className="relative w-40 h-40 shrink-0 flex items-center justify-center">
+          <svg className="w-full h-full transform -rotate-90 overflow-visible" viewBox="0 0 160 160">
             <circle
               cx="80"
               cy="80"
-              r="72"
+              r="68"
               stroke="currentColor"
               strokeWidth="12"
               fill="transparent"
@@ -59,12 +59,12 @@ const FilesView: React.FC<FilesViewProps> = ({ projects, onView, onDelete }) => 
             <circle
               cx="80"
               cy="80"
-              r="72"
+              r="68"
               stroke="currentColor"
               strokeWidth="12"
               fill="transparent"
-              strokeDasharray={452.4}
-              strokeDashoffset={452.4 - (452.4 * Number(storageStats.percent)) / 100}
+              strokeDasharray={427.26}
+              strokeDashoffset={427.26 - (427.26 * Number(storageStats.percent)) / 100}
               className="text-brand-500 transition-all duration-1000"
               strokeLinecap="round"
             />
