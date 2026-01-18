@@ -11,13 +11,12 @@ interface ProjectDetailViewProps {
   onBack: () => void;
   currentTime: number;
   setCurrentTime: (time: number) => void;
-  chatMessages: ChatMessage[];
   onSendMessage: (text: string) => void;
   isChatLoading: boolean;
 }
 
 const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({ 
-  project, onBack, currentTime, setCurrentTime, chatMessages, onSendMessage, isChatLoading 
+  project, onBack, currentTime, setCurrentTime, onSendMessage, isChatLoading 
 }) => {
   const mediaRef = useRef<HTMLMediaElement>(null);
 
@@ -43,7 +42,6 @@ const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   const activeChapterIndex = useMemo(() => {
     if (!project.data?.chapters) return -1;
     const chapters = project.data.chapters;
-    // Find the last chapter whose start time is less than or equal to current time
     for (let i = chapters.length - 1; i >= 0; i--) {
       if (currentTime >= chapters[i].seconds) {
         return i;
@@ -84,8 +82,8 @@ const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
           {project.data?.chapters && project.data.chapters.length > 0 && (
             <div className="flex flex-col gap-3 shrink-0">
               <div className="flex items-center justify-between px-1">
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                  <span className="material-icons-round text-brand-500 text-base">bookmarks</span>
+                <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.1em] flex items-center gap-2">
+                  <span className="material-icons-round text-brand-500 text-sm">bookmarks</span>
                   Video Chapters
                 </h3>
               </div>
@@ -94,29 +92,29 @@ const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                   <button
                     key={idx}
                     onClick={() => handleSeek(chapter.seconds)}
-                    className="flex-none w-44 group text-left transition-all focus:outline-none"
+                    className="flex-none w-40 group text-left transition-all focus:outline-none"
                   >
-                    <div className={`aspect-video rounded-2xl border-2 mb-2.5 overflow-hidden relative flex items-center justify-center transition-all duration-300 ${
+                    <div className={`aspect-video rounded-xl border-2 mb-2 overflow-hidden relative flex items-center justify-center transition-all duration-300 ${
                       idx === activeChapterIndex 
-                        ? 'border-brand-500 shadow-lg shadow-brand-500/10 scale-[1.02]' 
-                        : 'border-transparent bg-gray-100 hover:border-gray-200'
+                        ? 'border-brand-500 shadow-md shadow-brand-500/10 scale-[1.02]' 
+                        : 'border-transparent bg-gray-100 hover:border-gray-200 hover:-translate-y-0.5'
                     }`}>
                       <div className={`absolute inset-0 transition-colors duration-300 ${
                         idx === activeChapterIndex ? 'bg-brand-500/10' : 'bg-brand-500/5 group-hover:bg-brand-500/10'
                       }`}></div>
                       
-                      <span className={`material-icons-round transition-all duration-300 text-3xl ${
+                      <span className={`material-icons-round transition-all duration-300 text-2xl ${
                         idx === activeChapterIndex ? 'text-brand-600 scale-110' : 'text-gray-300 group-hover:text-brand-300'
                       }`}>
                         {idx === activeChapterIndex ? 'pause_circle' : 'play_circle'}
                       </span>
                       
-                      <div className="absolute bottom-2 right-2 bg-black/70 backdrop-blur-sm text-white text-[10px] px-1.5 py-0.5 rounded-md font-bold font-mono">
+                      <div className="absolute bottom-1.5 right-1.5 bg-black/70 backdrop-blur-sm text-white text-[9px] px-1.5 py-0.5 rounded-md font-bold font-mono tracking-tight">
                         {chapter.timestamp}
                       </div>
                     </div>
-                    <p className={`text-[11px] font-bold line-clamp-2 leading-snug transition-colors duration-300 ${
-                      idx === activeChapterIndex ? 'text-brand-600' : 'text-gray-700 group-hover:text-gray-900'
+                    <p className={`text-[10px] font-bold line-clamp-2 leading-tight transition-colors duration-300 px-0.5 ${
+                      idx === activeChapterIndex ? 'text-brand-600' : 'text-gray-600 group-hover:text-gray-900'
                     }`}>
                       {chapter.title}
                     </p>
@@ -128,7 +126,7 @@ const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
           
           <div className="flex-1 min-h-[400px]">
             <ChatInterface 
-              messages={chatMessages}
+              messages={project.chatHistory || []}
               onSendMessage={onSendMessage}
               isLoading={isChatLoading}
             />

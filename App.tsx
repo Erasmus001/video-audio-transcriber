@@ -16,19 +16,17 @@ function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [isLoadingDB, setIsLoadingDB] = useState(true);
-  const [isUrlLoading, setIsUrlLoading] = useState(false);
   
   // Notification State
   const [notifications, setNotifications] = useState<Notification[]>([]);
   
-  // Chat & Playback state
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  // UI state for active session
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   
   const abortControllers = useRef<Map<string, AbortController>>(new Map());
 
-  // Derived state
+  // Derived state: the current project is found directly from the projects array
   const activeProject = useMemo(() => 
     projects.find(p => p.id === activeProjectId), 
     [projects, activeProjectId]
@@ -58,6 +56,7 @@ function App() {
           if (p.file && (p.file instanceof Blob || (p.file as any) instanceof File)) {
             updatedProject.previewUrl = URL.createObjectURL(p.file);
           }
+          // Reset interrupted processing status
           if (p.status === 'processing') {
             updatedProject.status = 'failed';
             updatedProject.error = 'Analysis interrupted';
@@ -97,7 +96,6 @@ function App() {
         }
       }
 
-      // Read & Process
       const reader = new FileReader();
       const base64Promise = new Promise<string>((resolve, reject) => {
         reader.onload = () => resolve((reader.result as string).split(',')[1]);
@@ -146,9 +144,16 @@ function App() {
 
   const handleChatMessage = async (text: string) => {
     if (!activeProject) return;
+    
     const userMsg: ChatMessage = { role: 'user', text };
-    const updatedHistory = [...chatMessages, userMsg];
-    setChatMessages(updatedHistory);
+    const currentHistory = activeProject.chatHistory || [];
+    const updatedHistory = [...currentHistory, userMsg];
+
+    // Optimistically update the UI and projects list
+    setProjects(prev => prev.map(p => 
+      p.id === activeProject.id ? { ...p, chatHistory: updatedHistory } : p
+    ));
+    
     setIsChatLoading(true);
 
     try {
@@ -157,14 +162,23 @@ function App() {
         reader.onload = () => res((reader.result as string).split(',')[1]);
         reader.readAsDataURL(activeProject.file);
       });
+      
       const response = await askVideoQuestion(base64, activeProject.mimeType, text, updatedHistory);
       const modelMsg: ChatMessage = { role: 'model', text: response };
       const finalHistory = [...updatedHistory, modelMsg];
-      setChatMessages(finalHistory);
-      setProjects(prev => prev.map(p => p.id === activeProject.id ? { ...p, chatHistory: finalHistory } : p));
-      saveProject({ ...activeProject, chatHistory: finalHistory });
+      
+      // Update state with model response
+      setProjects(prev => prev.map(p => 
+        p.id === activeProject.id ? { ...p, chatHistory: finalHistory } : p
+      ));
+      
+      // Persist the entire updated history to IndexedDB
+      await saveProject({ ...activeProject, chatHistory: finalHistory });
     } catch (err) {
-      setChatMessages(prev => [...prev, { role: 'model', text: "Error processing your request." }]);
+      const errorMsg: ChatMessage = { role: 'model', text: "Sorry, I encountered an error processing your request." };
+      setProjects(prev => prev.map(p => 
+        p.id === activeProject.id ? { ...p, chatHistory: [...updatedHistory, errorMsg] } : p
+      ));
     } finally {
       setIsChatLoading(false);
     }
@@ -197,7 +211,6 @@ function App() {
               onBack={() => setActiveProjectId(null)}
               currentTime={currentTime}
               setCurrentTime={setCurrentTime}
-              chatMessages={chatMessages}
               onSendMessage={handleChatMessage}
               isChatLoading={isChatLoading}
             />
@@ -207,7 +220,7 @@ function App() {
                 <DashboardView 
                   stats={stats}
                   recentProjects={projects.slice(0, 7)}
-                  onView={(id) => { setActiveProjectId(id); setChatMessages(projects.find(p => p.id === id)?.chatHistory || []); }}
+                  onView={(id) => setActiveProjectId(id)}
                   onDelete={handleDelete}
                   onFileSelect={handleFileSelect}
                 />
@@ -215,7 +228,7 @@ function App() {
               {activeTab === 'transcripts' && (
                 <TranscriptsView 
                   projects={projects}
-                  onView={(id) => { setActiveProjectId(id); setChatMessages(projects.find(p => p.id === id)?.chatHistory || []); }}
+                  onView={(id) => setActiveProjectId(id)}
                   onDelete={handleDelete}
                   onFileSelect={handleFileSelect}
                 />
