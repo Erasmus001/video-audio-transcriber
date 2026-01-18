@@ -5,6 +5,7 @@ import DashboardView from './components/DashboardView';
 import TranscriptsView from './components/TranscriptsView';
 import ProjectDetailView from './components/ProjectDetailView';
 import FilesView from './components/FilesView';
+import SettingsView from './components/SettingsView';
 import NotificationToast, { Notification } from './components/NotificationToast';
 import { analyzeVideo, askVideoQuestion } from './services/geminiService';
 import { getCachedTranscript, cacheTranscript, saveProject, getAllProjects, deleteProjectFromDB } from './services/dbService';
@@ -234,6 +235,15 @@ function App() {
     if (activeProjectId === id) setActiveProjectId(null);
   };
 
+  const handleClearAll = async () => {
+    for (const p of projects) {
+      if (p.previewUrl) URL.revokeObjectURL(p.previewUrl);
+      await deleteProjectFromDB(p.id);
+    }
+    setProjects([]);
+    addNotification('success', "Library cleared successfully.");
+  };
+
   if (isLoadingDB) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-600"></div></div>;
 
   return (
@@ -286,18 +296,7 @@ function App() {
                 />
               )}
               {activeTab === 'settings' && (
-                <div className="max-w-2xl bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
-                  <h2 className="text-2xl font-bold mb-6">Application Settings</h2>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
-                      <div>
-                        <p className="font-medium">Storage Usage</p>
-                        <p className="text-xs text-gray-500">IndexedDB local storage</p>
-                      </div>
-                      <p className="font-mono text-sm">{stats.sizeGB} GB</p>
-                    </div>
-                  </div>
-                </div>
+                <SettingsView stats={stats} onClearAll={handleClearAll} />
               )}
             </>
           )}
